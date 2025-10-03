@@ -4,97 +4,134 @@ import digitalio
 import usb_hid
 import busio
 import displayio
-import terminalio
 from adafruit_display_text import label
 from i2cdisplaybus import I2CDisplayBus
 from adafruit_displayio_ssd1306 import SSD1306
-
-from adafruit_hid.keyboard import Keyboard
+from adafruit_bitmap_font import bitmap_font
 from adafruit_hid.consumer_control import ConsumerControl
 from adafruit_hid.consumer_control_code import ConsumerControlCode
 
-displayio.release_displays()
+DISPLAY_WIDTH = 128
+DISPLAY_HEIGHT = 64
+DISPLAY_ADDRESS = 0x3C
+I2C_SCL_PIN = board.GP5
+I2C_SDA_PIN = board.GP4
+FONT_FILE = "fonts/terminal.bdf"
+BUTTON_PINS = [board.GP15, board.GP14, board.GP13, board.GP12, board.GP11]
+DEBOUNCE_DELAY = 0.05
 
-i2c = busio.I2C(scl=board.GP5, sda=board.GP4)
+class Button:
+    def __init__(self, pin):
+        self.pin = digitalio.DigitalInOut(pin)
+        self.pin.direction = digitalio.Direction.INPUT
+        self.pin.pull = digitalio.Pull.DOWN
+        self.previous_state = False
+    
+    @property
+    def pressed(self):
+        current = self.pin.value
+        if current and not self.previous_state:
+            return True
+        return False
+    
+    @property
+    def released(self):
+        current = self.pin.value
+        if not current and self.previous_state:
+            return True
+        return False
+    
+    def update(self):
+        self.previous_state = self.pin.value
 
-display_bus = I2CDisplayBus(i2c, device_address=0x3C)
-display = SSD1306(display_bus, width=128, height=64)
 
-splash = displayio.Group()
-display.root_group = splash
+def setup_display():
+    displayio.release_displays()
+    
+    i2c = busio.I2C(scl=I2C_SCL_PIN, sda=I2C_SDA_PIN)
+    display_bus = I2CDisplayBus(i2c, device_address=DISPLAY_ADDRESS)
+    display = SSD1306(display_bus, width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT)
+    
+    font = bitmap_font.load_font(FONT_FILE)
+    
+    splash = displayio.Group()
+    display.root_group = splash
+    
+    bg_bitmap = displayio.Bitmap(DISPLAY_WIDTH, DISPLAY_HEIGHT, 1)
+    bg_palette = displayio.Palette(1)
+    bg_palette[0] = 0xFFFFFF
+    bg_sprite = displayio.TileGrid(bg_bitmap, pixel_shader=bg_palette, x=0, y=0)
+    splash.append(bg_sprite)
+    
+    inner_bitmap = displayio.Bitmap(DISPLAY_WIDTH - 2, DISPLAY_HEIGHT - 2, 1)
+    inner_palette = displayio.Palette(1)
+    inner_palette[0] = 0x000000
+    inner_sprite = displayio.TileGrid(inner_bitmap, pixel_shader=inner_palette, x=1, y=1)
+    splash.append(inner_sprite)
+    
+    title_label = label.Label(font, text="MACRO KEYBOARD", color=0xFFFFFF)
+    title_label.anchor_point = (0.5, 0.0)
+    title_label.anchored_position = (DISPLAY_WIDTH // 2, 5)
+    splash.append(title_label)
+    
+    status_label = label.Label(font, text="READY", color=0xFFFFFF)
+    status_label.anchor_point = (0.5, 0.5)
+    status_label.anchored_position = (DISPLAY_WIDTH // 2, 38)
+    status_label.scale = 3
+    splash.append(status_label)
+    
+    return display, status_label
 
-text = "Macro Keyboard"
-text_area = label.Label(terminalio.FONT, text=text, color=0xFFFFFF, x=10, y=15)
-splash.append(text_area)
+ACTIONS = [
+    {"code": ConsumerControlCode.SCAN_PREVIOUS_TRACK, "label": "PREV"},
+    {"code": ConsumerControlCode.PLAY_PAUSE, "label": "PLAY"},
+    {"code": ConsumerControlCode.SCAN_NEXT_TRACK, "label": "NEXT"},
+    {"code": ConsumerControlCode.VOLUME_DECREMENT, "label": "VOL-"},
+    {"code": ConsumerControlCode.VOLUME_INCREMENT, "label": "VOL+"},
+]
 
-keyboard = Keyboard(usb_hid.devices)
+display, status_label = setup_display()
 consumer_control = ConsumerControl(usb_hid.devices)
+buttons = [Button(pin) for pin in BUTTON_PINS]
+current_status = "READY"
 
-btn0_pin = board.GP15
+last_action_time = 0
+DISPLAY_TIMEOUT = 2.0
 
-btn0 = digitalio.DigitalInOut(btn0_pin)
-btn0.direction = digitalio.Direction.INPUT
-btn0.pull = digitalio.Pull.DOWN
+def update_status(new_status):
+    global current_status, last_action_time
+    if current_status != new_status:
+        current_status = new_status
+        status_label.text = current_status
+        if new_status != "READY":
+            last_action_time = time.monotonic()
 
-btn1_pin = board.GP14
-
-btn1 = digitalio.DigitalInOut(btn1_pin)
-btn1.direction = digitalio.Direction.INPUT
-btn1.pull = digitalio.Pull.DOWN
-
-btn2_pin = board.GP13
-
-btn2 = digitalio.DigitalInOut(btn2_pin)
-btn2.direction = digitalio.Direction.INPUT
-btn2.pull = digitalio.Pull.DOWN
-
-btn3_pin = board.GP12
-
-btn3 = digitalio.DigitalInOut(btn3_pin)
-btn3.direction = digitalio.Direction.INPUT
-btn3.pull = digitalio.Pull.DOWN
-
-btn4_pin = board.GP11
-
-btn4 = digitalio.DigitalInOut(btn4_pin)
-btn4.direction = digitalio.Direction.INPUT
-btn4.pull = digitalio.Pull.DOWN
-
-btn0_prev = False
-btn1_prev = False
-btn2_prev = False
-btn3_prev = False
-btn4_prev = False
-
+print("Macro keyboard ready!")
 while True:
-    if btn0.value and not btn0_prev:
-        consumer_control.press(ConsumerControlCode.SCAN_PREVIOUS_TRACK)
-    elif not btn0.value and btn0_prev:
-        consumer_control.release()
-    btn0_prev = btn0.value
-
-    if btn1.value and not btn1_prev:
-        consumer_control.press(ConsumerControlCode.PLAY_PAUSE)
-    elif not btn1.value and btn1_prev:
-        consumer_control.release()
-    btn1_prev = btn1.value
-
-    if btn2.value and not btn2_prev:
-        consumer_control.press(ConsumerControlCode.SCAN_NEXT_TRACK)
-    elif not btn2.value and btn2_prev:
-        consumer_control.release()
-    btn2_prev = btn2.value
-
-    if btn3.value and not btn3_prev:
-        consumer_control.press(ConsumerControlCode.VOLUME_DECREMENT)
-    elif not btn3.value and btn3_prev:
-        consumer_control.release()
-    btn3_prev = btn3.value
-
-    if btn4.value and not btn4_prev:
-        consumer_control.press(ConsumerControlCode.VOLUME_INCREMENT)
-    elif not btn4.value and btn4_prev:
-        consumer_control.release()
-    btn4_prev = btn4.value
+    try:
+        current_time = time.monotonic()
         
-    time.sleep(0.1)
+        if (current_status != "READY" and 
+            current_time - last_action_time > DISPLAY_TIMEOUT):
+            update_status("READY")
+        
+        for i, button in enumerate(buttons):
+            action = ACTIONS[i]
+            
+            if button.pressed:
+                consumer_control.press(action["code"])
+                print(f"Button {i} pressed: {action['label']}")
+            
+            elif button.released:
+                consumer_control.release()
+                update_status(action["label"])  # Show action label
+                print(f"Button {i} released: {action['label']}")
+            
+            button.update()
+        
+        time.sleep(DEBOUNCE_DELAY)
+        
+    except Exception as e:
+        print(f"Error in main loop: {e}") 
+        update_status("ERROR")
+        time.sleep(0.5)
