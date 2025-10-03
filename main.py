@@ -2,11 +2,30 @@ import time
 import board
 import digitalio
 import usb_hid
+import busio
+import displayio
+import terminalio
+from adafruit_display_text import label
+from i2cdisplaybus import I2CDisplayBus
+from adafruit_displayio_ssd1306 import SSD1306
 
 from adafruit_hid.keyboard import Keyboard
-from adafruit_hid.keycode import Keycode
 from adafruit_hid.consumer_control import ConsumerControl
 from adafruit_hid.consumer_control_code import ConsumerControlCode
+
+displayio.release_displays()
+
+i2c = busio.I2C(scl=board.GP5, sda=board.GP4)
+
+display_bus = I2CDisplayBus(i2c, device_address=0x3C)
+display = SSD1306(display_bus, width=128, height=64)
+
+splash = displayio.Group()
+display.root_group = splash
+
+text = "Macro Keyboard"
+text_area = label.Label(terminalio.FONT, text=text, color=0xFFFFFF, x=10, y=15)
+splash.append(text_area)
 
 keyboard = Keyboard(usb_hid.devices)
 consumer_control = ConsumerControl(usb_hid.devices)
